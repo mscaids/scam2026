@@ -1,0 +1,218 @@
+##############################################################################
+# STEP 1 : LIBRARIES (all imports at the start)
+##############################################################################
+
+# Import all libraries for data, plotting, metrics and every model
+import warnings
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, roc_curve, roc_auc_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
+from xgboost import XGBClassifier
+
+warnings.filterwarnings('ignore')
+
+
+##############################################################################
+# STEP 2 : DATASET LOADING (BANK-LOAN, default for all models)
+##############################################################################
+
+# Load the bank loan dataset
+df = pd.read_csv('/content/BANK-LOAN.csv')
+
+
+##############################################################################
+# STEP 3 : EDA + COMMON PREPROCESSING (written once, used by all models)
+##############################################################################
+
+# Look at first rows, shape and data types
+print(df.head())
+print(df.shape)
+print(df.dtypes)
+
+# Check missing values and summary statistics
+print(df.isnull().sum())
+print(df.describe())
+
+# Check target class balance
+print(df['DEFAULTER'].value_counts(normalize=True))
+
+# Drop ID column and treat AGE as categorical
+df = df.drop(columns=['SN'])
+df['AGE'] = df['AGE'].astype('category')
+
+# One-hot encode categorical columns
+dff = pd.get_dummies(df, drop_first=True)
+
+# Split features/target and make common 70/30 train-test split
+X = dff.drop(columns=['DEFAULTER'])
+y = dff['DEFAULTER']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+
+# =========================== 4.1  BINARY LOGISTIC REGRESSION ===========================
+
+# Model: standardise features
+sc = StandardScaler()
+X_train_sc = sc.fit_transform(X_train)
+X_test_sc = sc.transform(X_test)
+
+# Model: train balanced logistic regression
+blr = LogisticRegression(class_weight='balanced', max_iter=500, random_state=42)
+blr.fit(X_train_sc, y_train)
+
+# Evaluation: predictions, probabilities and accuracy
+y_pred_blr = blr.predict(X_test_sc)
+y_prob_blr = blr.predict_proba(X_test_sc)[:, 1]
+print("BLR Accuracy:", accuracy_score(y_test, y_pred_blr))
+
+# Evaluation: confusion matrix, report and ROC-AUC
+print(confusion_matrix(y_test, y_pred_blr))
+print(classification_report(y_test, y_pred_blr))
+print("BLR ROC-AUC:", roc_auc_score(y_test, y_prob_blr))
+
+# Plotting: ROC curve for BLR
+fpr, tpr, _ = roc_curve(y_test, y_prob_blr)
+plt.plot(fpr, tpr, label='BLR AUC = %0.3f' % roc_auc_score(y_test, y_prob_blr))
+plt.plot([0, 1], [0, 1], '--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('BLR ROC Curve')
+plt.legend()
+plt.show()
+
+
+# =========================== 4.2  SUPPORT VECTOR MACHINE (SVM) ===========================
+
+# Model: train RBF-kernel SVM on scaled data (reuses scaler from BLR)
+svm_clf = SVC(kernel='rbf', C=1.0, gamma='scale', probability=True, random_state=42)
+svm_clf.fit(X_train_sc, y_train)
+
+# Evaluation: predictions, probabilities and accuracy
+y_pred_svm = svm_clf.predict(X_test_sc)
+y_prob_svm = svm_clf.predict_proba(X_test_sc)[:, 1]
+print("SVM Accuracy:", accuracy_score(y_test, y_pred_svm))
+
+# Evaluation: confusion matrix, report and ROC-AUC
+print(confusion_matrix(y_test, y_pred_svm))
+print(classification_report(y_test, y_pred_svm))
+print("SVM ROC-AUC:", roc_auc_score(y_test, y_prob_svm))
+
+# Plotting: ROC curve for SVM
+fpr, tpr, _ = roc_curve(y_test, y_prob_svm)
+plt.plot(fpr, tpr, label='SVM AUC = %0.3f' % roc_auc_score(y_test, y_prob_svm))
+plt.plot([0, 1], [0, 1], '--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('SVM ROC Curve')
+plt.legend()
+plt.show()
+
+
+# =========================== 4.3  DECISION TREE ===========================
+
+# Model: entropy tree limited by min_samples_split = 10% of training rows
+dtcl = DecisionTreeClassifier(criterion='entropy', min_samples_split=int(len(X_train) * 0.10), random_state=42)
+dtcl.fit(X_train, y_train)
+
+# Evaluation: probabilities and custom 0.3 cutoff
+y_prob_dt = dtcl.predict_proba(X_test)[:, 1]
+pred_dt = np.where(y_prob_dt > 0.3, 1, 0)
+
+# Evaluation: confusion matrix, report and ROC-AUC
+print(confusion_matrix(y_test, pred_dt))
+print(classification_report(y_test, pred_dt))
+print("DT ROC-AUC:", roc_auc_score(y_test, y_prob_dt))
+
+# Plotting: draw the decision tree
+plt.figure(figsize=(20, 20))
+plot_tree(dtcl, filled=True, feature_names=list(X.columns))
+plt.show()
+
+
+# =========================== 4.4  RANDOM FOREST ===========================
+
+# Model: 100 trees with OOB score and sqrt features per split
+rf = RandomForestClassifier(n_estimators=100, random_state=42, oob_score=True, max_features='sqrt')
+rf.fit(X_train, y_train)
+
+# Evaluation: probabilities and custom 0.3 cutoff
+y_prob_rf = rf.predict_proba(X_test)[:, 1]
+pred_rf = np.where(y_prob_rf > 0.3, 1, 0)
+
+# Evaluation: confusion matrix, accuracy, report and ROC-AUC
+print(confusion_matrix(y_test, pred_rf))
+print("RF Accuracy:", accuracy_score(y_test, pred_rf))
+print(classification_report(y_test, pred_rf))
+print("RF ROC-AUC:", roc_auc_score(y_test, y_prob_rf))
+
+# Plotting: draw the first tree of the forest
+plt.figure(figsize=(20, 20))
+plot_tree(rf.estimators_[0], filled=True, feature_names=list(X.columns), rounded=True, fontsize=8)
+plt.show()
+
+
+# =========================== 4.5  NEURAL NETWORK (MLP) ===========================
+
+# Model: min-max scale features for the neural network
+mm = MinMaxScaler()
+X_train_mm = mm.fit_transform(X_train)
+X_test_mm = mm.transform(X_test)
+
+# Model: train MLP with one hidden layer of 3 neurons
+nn = MLPClassifier(hidden_layer_sizes=(3,), max_iter=300, activation='relu', solver='adam', random_state=1)
+nn.fit(X_train_mm, y_train)
+
+# Evaluation: probabilities and custom 0.3 cutoff
+y_prob_nn = nn.predict_proba(X_test_mm)[:, 1]
+pred_nn = np.where(y_prob_nn > 0.3, 1, 0)
+
+# Evaluation: confusion matrix, report and ROC-AUC
+print(confusion_matrix(y_test, pred_nn))
+print(classification_report(y_test, pred_nn))
+print("NN ROC-AUC:", roc_auc_score(y_test, y_prob_nn))
+
+# Plotting: loss curve over training iterations
+plt.plot(nn.loss_curve_)
+plt.xlabel('Iteration')
+plt.ylabel('Loss')
+plt.title('MLP Training Loss')
+plt.show()
+
+
+# =========================== 4.6  XGBOOST (BOOSTING) ===========================
+
+# Model: train XGBoost with 100 trees and learning rate 0.1
+xgb = XGBClassifier(n_estimators=100, learning_rate=0.1, random_state=42, eval_metric='logloss')
+xgb.fit(X_train, y_train)
+
+# Evaluation: optimal threshold using Youden's J statistic
+y_prob_xgb = xgb.predict_proba(X_test)[:, 1]
+fpr, tpr, thresholds = roc_curve(y_test, y_prob_xgb)
+best_threshold = thresholds[np.argmax(tpr - fpr)]
+print("Optimal Threshold:", best_threshold)
+
+# Evaluation: predictions at optimal threshold with confusion matrix
+pred_xgb = (y_prob_xgb >= best_threshold).astype(int)
+print("Confusion Matrix:\n", confusion_matrix(y_test, pred_xgb))
+
+# Evaluation: classification report and test AUC
+print("Classification Report:\n", classification_report(y_test, pred_xgb))
+print(f"Test AUC: {roc_auc_score(y_test, y_prob_xgb):.3f}")
+
+# Plotting: ROC curve for XGBoost
+plt.figure()
+plt.plot(fpr, tpr, label='AUC = %0.3f' % roc_auc_score(y_test, y_prob_xgb))
+plt.plot([0, 1], [0, 1], '--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.legend()
+plt.show()
